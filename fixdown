@@ -1,0 +1,88 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "open3"
+
+# Let `git commit --amend` reach into the mists of time
+module Fixdown
+  module_function
+
+  # Commit each modified file as a --fixup commit against
+  # the last commit that modified it.
+  def fixup_modified_files
+    lines.each do |line|
+      if line.modified?
+        Commit.(line.path, line.last_changed_commit)
+      else
+        puts "skip #{line.inspect}"
+      end
+    end
+  end
+
+  def lines
+    git(
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=no",
+      "--no-ahead-behind",
+      "--no-renames",
+      "-z"
+    ).split("\0").map { |text| Line.parse(text) }
+  end
+
+  class Line
+    attr_reader :path
+    def initialize(x, y, path)
+      @x = x
+      @y = y
+      @path = path
+    end
+
+    PARSER = /(.)(.) (.*)/
+
+    def self.parse(line)
+      match = PARSER.match(line)
+      if !match
+        raise "Invalid line: #{line}"
+      else
+        new(match[1], match[2], match[3])
+      end
+    end
+
+    def modified?
+      @y == "M"
+    end
+
+    def last_changed_commit
+      git("log", "-1", "--format=%H", @path)
+    end
+  end
+
+  class Commit
+    PARSER = /.*\s(.*)\]/
+    def self.call(path, fixup)
+      out, *rest = git("commit", path, "--fixup", fixup).split("\n")
+      match = PARSER.match(out)
+      if !match
+        raise "Invalid output: #{out}"
+      end
+      result = new(match[1])
+      puts "git commit #{path} --fixup #{fixup} => #{result.oid}"
+    end
+
+    attr_reader :oid
+    def initialize(oid)
+      @oid = oid
+    end
+  end
+end
+
+def git(*argv)
+  out, err, status = Open3.capture3("git", *argv)
+  raise "git #{argv.join(" ")} failed: #{err}" unless status.success?
+  out.chomp
+end
+
+if $PROGRAM_NAME == __FILE__
+  Fixdown.fixup_modified_files
+end
