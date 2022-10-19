@@ -4,6 +4,10 @@ _Let `git commit --amend` reach into the mists of time_
 
 ---
 
+## Installation
+
+Copy into your $PATH.
+
 ## What's this?
 
 One git workflow I use involves frequently rebasing. After a messy
