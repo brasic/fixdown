@@ -67,7 +67,7 @@ module Fixdown
         raise "Invalid output: #{out}"
       end
       result = new(match[1])
-      puts "git commit #{path} --fixup #{fixup} => #{result.oid}"
+      puts "git commit #{path} --fixup #{fixup.first(7)} => #{result.oid}"
     end
 
     attr_reader :oid
