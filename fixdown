@@ -12,7 +12,10 @@ module Fixdown
   def fixup_modified_files
     lines.each do |line|
       if line.modified?
-        Commit.(line.path, line.last_changed_commit)
+        Commit.create_fixup(
+          path: line.path,
+          amends: line.last_changed_commit
+        )
       else
         puts "skip #{line.inspect}"
       end
@@ -54,25 +57,29 @@ module Fixdown
     end
 
     def last_changed_commit
-      git("log", "-1", "--format=%H", @path)
+      Commit.new(
+        git("log", "-1", "--format=%H", @path)
+      )
     end
   end
 
   class Commit
     PARSER = /.*\s(.*)\]/
-    def self.call(path, fixup)
-      out, *rest = git("commit", path, "--fixup", fixup).split("\n")
+    def self.create_fixup(path:, amends:)
+      out, *rest = git("commit", path, "--fixup", amends.oid).split("\n")
       match = PARSER.match(out)
       if !match
         raise "Invalid output: #{out}"
       end
-      result = new(match[1])
-      puts "git commit #{path} --fixup #{fixup.first(7)} => #{result.oid}"
+      new(match[1]).tap do |created|
+        puts "git commit #{path} --fixup #{amends.short_oid} => #{created.oid}"
+      end
     end
 
-    attr_reader :oid
+    attr_reader :oid, :short_oid
     def initialize(oid)
       @oid = oid
+      @short_oid = oid[0, 7]
     end
   end
 end
