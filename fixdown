@@ -10,63 +10,82 @@ module Fixdown
   # Commit each modified file as a --fixup commit against
   # the last commit that modified it.
   def fixup_modified_files
-    lines.each do |line|
-      if line.modified?
-        Commit.create_fixup(
-          path: line.path,
-          amends: line.last_changed_commit
-        )
-      else
-        puts "skip #{line.inspect}"
-      end
-    end
-  end
-
-  def lines
-    git(
-      "status",
-      "--porcelain=v1",
-      "--untracked-files=no",
-      "--no-ahead-behind",
-      "--no-renames",
-      "-z"
-    ).split("\0").map { |text| Line.parse(text) }
-  end
-
-  class Line
-    attr_reader :path
-    def initialize(x, y, path)
-      @x = x
-      @y = y
-      @path = path
-    end
-
-    PARSER = /(.)(.) (.*)/
-
-    def self.parse(line)
-      match = PARSER.match(line)
-      if !match
-        raise "Invalid line: #{line}"
-      else
-        new(match[1], match[2], match[3])
-      end
-    end
-
-    def modified?
-      @y == "M"
-    end
-
-    def last_changed_commit
-      Commit.new(
-        git("log", "-1", "--format=%H", @path)
+    StatusList.each_modified do |line|
+      Commit.create_fixup(
+        path: line.path,
+        amends: line.last_changed_commit
       )
+    end or puts "nothing do to..."
+  end
+
+  class StatusList
+    def initialize
+      @lines = git(
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no",
+        "--no-ahead-behind",
+        "--no-renames",
+        "-z"
+      ).split("\0").map { |text| Line.parse(text) }
+    end
+
+    def self.each_modified(&blk)
+      new.each_modified(&blk)
+    end
+
+    def each_modified
+      return nil if @lines.size == 0
+      @lines.each do |line|
+        if line.new_file?
+          puts "skip #{line.path} (new file, nothing to amend)"
+        elsif line.modified?
+          yield line
+        else
+          puts "skip #{line.inspect}"
+        end
+      end
+    end
+
+    class Line
+      attr_reader :path
+      def initialize(x, y, path)
+        @x = x
+        @y = y
+        @path = path
+      end
+
+      PARSER = /(.)(.) (.*)/
+
+      def self.parse(line)
+        match = PARSER.match(line)
+        if !match
+          raise "Invalid line: #{line}"
+        else
+          new(match[1], match[2], match[3])
+        end
+      end
+
+      def modified?
+        @y == "M"
+      end
+
+      def new_file?
+        @x == "A"
+      end
+
+      def last_changed_commit
+        Commit.new(
+          git("log", "-1", "--format=%H", @path)
+        )
+      end
     end
   end
 
   class Commit
     PARSER = /.*\s(.*)\]/
     def self.create_fixup(path:, amends:)
-      out, *rest = git("commit", path, "--fixup", amends.oid).split("\n")
+      out, * = git("commit", path, "--fixup", amends.oid).split("\n")
       match = PARSER.match(out)
       if !match
         raise "Invalid output: #{out}"
@@ -78,6 +97,9 @@ module Fixdown
 
     attr_reader :oid, :short_oid
     def initialize(oid)
+      if oid.size < 7 || oid.size > 40
+        fail ArgumentError, "bad oid input for `Commit.new`: #{oid.inspect}"
+      end
       @oid = oid
       @short_oid = oid[0, 7]
     end
@@ -85,8 +107,9 @@ module Fixdown
 end
 
 def git(*argv)
-  out, err, status = Open3.capture3("git", *argv)
-  raise "git #{argv.join(" ")} failed: #{err}" unless status.success?
+  cmd = ["git", *argv]
+  out, err, status = Open3.capture3(*cmd)
+  raise "#{cmd.inspect} failed: #{err}" unless status.success?
   out.chomp
 end
 
