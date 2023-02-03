@@ -7,12 +7,6 @@ require "open3"
 module Fixdown
   module_function
 
-  # Commit each modified file as a --fixup commit against
-  # the last commit that modified it.
-  def fixup_modified_files
-    WorkingTreeStatus.each_modified(&:fixup!) or die "nothing do to..."
-  end
-
   def fixup_file(path)
     line = WorkingTreeStatus.for_path(path) or die "#{path} is not modified, cannot fixup"
     line.fixup!
@@ -31,8 +25,8 @@ module Fixdown
       ).split("\0").map { |text| Line.parse(text) }
     end
 
-    def self.each_modified(&blk)
-      new.each_modified(&blk)
+    def self.modified_files
+      new.modified_files
     end
 
     # Return the Line entry for a path or nil
@@ -40,17 +34,19 @@ module Fixdown
       new.lines.detect { |l| l.path == path }
     end
 
-    def each_modified
-      return nil if @lines.size == 0
+    def modified_files
+      res = []
+      return res if @lines.size == 0
       @lines.each do |line|
         if line.new_file?
           puts "skip #{line.path} (new file, nothing to amend)"
         elsif line.modified?
-          yield line
+          res << line
         else
           puts "skip #{line.inspect}"
         end
       end
+      res
     end
 
     class Line
@@ -132,9 +128,10 @@ def die(msg)
 end
 
 if $PROGRAM_NAME == __FILE__
-  if ARGV[0]
-    Fixdown.fixup_file(ARGV[0])
-  else
-    Fixdown.fixup_modified_files
+  files = Fixdown::WorkingTreeStatus.modified_files
+  if ARGV.size > 0
+    files.select! { |f| ARGV.include?(f.path) }
   end
+
+  files.each(&:fixup!)
 end
